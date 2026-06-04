@@ -82,23 +82,14 @@ router.post('/forgot-password', async (req, res) => {
       return res.status(400).json({ message: 'Email is required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-
     // Find user by email
-    const user = await User.findOne({ email: normalizedEmail, isActive: true });
+    const user = await User.findOne({ email, isActive: true });
     if (!user) {
-      return res.status(404).json({ message: 'Email not found or inactive' });
+      // For security, don't reveal if email exists or not
+      return res.status(200).json({ 
+        message: 'If an account exists with this email, you will receive an OTP shortly.' 
+      });
     }
-
-    if (user.role !== 'admin') {
-      return res.status(403).json({ message: 'Password reset is allowed only for admin accounts' });
-    }
-
-    // Invalidate previous OTPs before issuing a new one
-    await PasswordReset.updateMany(
-      { email: normalizedEmail, isUsed: false },
-      { isUsed: true }
-    );
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -119,7 +110,7 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     res.status(200).json({ 
-      message: 'OTP sent to the registered admin email address.' 
+      message: 'If an account exists with this email, you will receive an OTP shortly.' 
     });
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -136,16 +127,9 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ message: 'Email and OTP are required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normalizedEmail, isActive: true });
-
-    if (!user || user.role !== 'admin') {
-      return res.status(400).json({ message: 'Invalid email or OTP' });
-    }
-
     // Find valid OTP
     const resetRequest = await PasswordReset.findOne({
-      email: normalizedEmail,
+      email: email.toLowerCase(),
       otp: otp,
       isUsed: false,
       expiresAt: { $gt: new Date() }
@@ -178,20 +162,9 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 6 characters long' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normalizedEmail, isActive: true });
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (user.role !== 'admin') {
-      return res.status(403).json({ message: 'Password reset is allowed only for admin accounts' });
-    }
-
     // Find valid OTP
     const resetRequest = await PasswordReset.findOne({
-      email: normalizedEmail,
+      email: email.toLowerCase(),
       otp: otp,
       isUsed: false,
       expiresAt: { $gt: new Date() }
@@ -201,6 +174,12 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
     }
 
+    // Find user and update password
+    const user = await User.findOne({ email: email.toLowerCase(), isActive: true });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     // Update password (the pre-save hook will hash it)
     user.password = newPassword;
     await user.save();
@@ -208,6 +187,9 @@ router.post('/reset-password', async (req, res) => {
     // Mark OTP as used
     resetRequest.isUsed = true;
     await resetRequest.save();
+
+    // Optionally: Invalidate all existing sessions/tokens
+    // You can add a passwordChangedAt field to your user schema for token invalidation
 
     res.status(200).json({ 
       message: 'Password reset successful. You can now login with your new password.' 
@@ -227,20 +209,17 @@ router.post('/resend-otp', async (req, res) => {
       return res.status(400).json({ message: 'Email is required' });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normalizedEmail, isActive: true });
-
+    // Check if user exists
+    const user = await User.findOne({ email, isActive: true });
     if (!user) {
-      return res.status(404).json({ message: 'Email not found or inactive' });
-    }
-
-    if (user.role !== 'admin') {
-      return res.status(403).json({ message: 'OTP resend is allowed only for admin accounts' });
+      return res.status(200).json({ 
+        message: 'If an account exists, you will receive an OTP shortly.' 
+      });
     }
 
     // Mark all existing OTPs as used
     await PasswordReset.updateMany(
-      { email: normalizedEmail, isUsed: false },
+      { email: user.email, isUsed: false },
       { isUsed: true }
     );
 
