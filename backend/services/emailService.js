@@ -1,21 +1,12 @@
-import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { Resend } from 'resend';
 
 dotenv.config();
 
-// Create transporter
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE,
-    host: process.env.EMAIL_HOST,
-    port: process.env.EMAIL_PORT,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-};
+const resend = new Resend({ apiKey: process.env.RESEND_API_KEY });
+
+// Helper to get `from` address (use EMAIL_FROM if set, otherwise fallback to EMAIL_USER)
+const getFromAddress = () => process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
 // Email template for employee credentials
 const createEmployeeEmailTemplate = (employeeData, loginUrl) => {
@@ -110,7 +101,6 @@ const createEmployeeEmailTemplate = (employeeData, loginUrl) => {
 // Send employee credentials email
 export const sendEmployeeCredentials = async (employeeData, plainPassword) => {
   try {
-    const transporter = createTransporter();
     const loginUrl = `${process.env.FRONTEND_URL}/login`;
     
     const mailOptions = {
@@ -142,9 +132,16 @@ Best regards,
 Company HR Team`
     };
 
-    const result = await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully:', result.messageId);
-    return { success: true, messageId: result.messageId };
+        const resp = await resend.emails.send({
+            from: `${mailOptions.from.name} <${mailOptions.from.address}>`,
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            html: mailOptions.html,
+            text: mailOptions.text,
+        });
+
+        console.log('Email sent via Resend:', resp.id);
+        return { success: true, messageId: resp.id };
   } catch (error) {
     console.error('Error sending email:', error);
     return { success: false, error: error.message };
@@ -154,10 +151,30 @@ Company HR Team`
 // Test email configuration
 export const testEmailConfig = async () => {
   try {
-    const transporter = createTransporter();
-    await transporter.verify();
-    console.log('Email configuration is correct');
-    return true;
+        // Simple check: ensure API key present and try to send a lightweight test email to yourself
+        if (!process.env.RESEND_API_KEY) {
+            console.error('RESEND_API_KEY is not set');
+            return false;
+        }
+
+        if (!getFromAddress()) {
+            console.error('From address not configured (EMAIL_FROM or EMAIL_USER)');
+            return false;
+        }
+
+        // Optionally send a test email only when TEST_EMAIL_TO is set
+        if (process.env.TEST_EMAIL_TO) {
+            const resp = await resend.emails.send({
+                from: `${process.env.EMAIL_FROM || 'No Reply'} <${getFromAddress()}>`,
+                to: process.env.TEST_EMAIL_TO,
+                subject: 'Test email from Resend',
+                html: '<p>This is a test email to verify Resend configuration.</p>',
+            });
+            console.log('Test email sent via Resend:', resp.id);
+        }
+
+        console.log('Resend configuration appears correct');
+        return true;
   } catch (error) {
     console.error('Email configuration error:', error);
     return false;
@@ -167,35 +184,27 @@ export const testEmailConfig = async () => {
 // Send payslip email
 export const sendPayslipEmail = async (payslip) => {
   try {
-    const transporter = createTransporter();
-    
-    const mailOptions = {
-      from: {
-        name: 'Zynith IT Solutions - HR',
-        address: process.env.EMAIL_USER
-      },
-      to: payslip.email,
-      subject: `Salary Payslip - ${payslip.month} ${payslip.year}`,
-      html: createPayslipEmailTemplate(payslip),
-      text: `Dear ${payslip.name},
+        const mailOptions = {
+            from: {
+                name: 'Zynith IT Solutions - HR',
+                address: getFromAddress()
+            },
+            to: payslip.email,
+            subject: `Salary Payslip - ${payslip.month} ${payslip.year}`,
+            html: createPayslipEmailTemplate(payslip),
+            text: `Dear ${payslip.name},\n\nYour salary for ${payslip.month} ${payslip.year} has been processed.\n\nEmployee ID: ${payslip.employeeId}\nBasic Salary: $${payslip.basicSalary}\nGross Earnings: $${payslip.grossEarnings}\nTotal Deductions: $${payslip.totalDeductions}\nNet Pay: $${payslip.netPay}\n\nPlease find the attached payslip for detailed information.\n\nBest regards,\nZynith IT Solutions HR Team`
+        };
 
-Your salary for ${payslip.month} ${payslip.year} has been processed.
+        const resp = await resend.emails.send({
+            from: `${mailOptions.from.name} <${mailOptions.from.address}>`,
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            html: mailOptions.html,
+            text: mailOptions.text,
+        });
 
-Employee ID: ${payslip.employeeId}
-Basic Salary: $${payslip.basicSalary}
-Gross Earnings: $${payslip.grossEarnings}
-Total Deductions: $${payslip.totalDeductions}
-Net Pay: $${payslip.netPay}
-
-Please find the attached payslip for detailed information.
-
-Best regards,
-Zynith IT Solutions HR Team`
-    };
-
-    const result = await transporter.sendMail(mailOptions);
-    console.log('Payslip email sent successfully:', result.messageId);
-    return { success: true, messageId: result.messageId };
+        console.log('Payslip email sent via Resend:', resp.id);
+        return { success: true, messageId: resp.id };
   } catch (error) {
     console.error('Error sending payslip email:', error);
     return { success: false, error: error.message };
@@ -437,31 +446,27 @@ const createOTPEmailTemplate = (otp, userName) => {
 // Send OTP for password reset
 export const sendPasswordResetOTP = async (email, otp, userName) => {
   try {
-    const transporter = createTransporter();
-    
-    const mailOptions = {
-      from: {
-        name: 'Zynith IT Solutions - Security',
-        address: process.env.EMAIL_USER
-      },
-      to: email,
-      subject: 'Password Reset OTP - Zynith IT Solutions',
-      html: createOTPEmailTemplate(otp, userName),
-      text: `Password Reset Request
-        
-Your OTP for password reset is: ${otp}
+        const mailOptions = {
+            from: {
+                name: 'Zynith IT Solutions - Security',
+                address: getFromAddress()
+            },
+            to: email,
+            subject: 'Password Reset OTP - Zynith IT Solutions',
+            html: createOTPEmailTemplate(otp, userName),
+            text: `Password Reset Request\n\nYour OTP for password reset is: ${otp}\n\nThis OTP is valid for 10 minutes.\n\nIf you didn't request this, please ignore this email.\n\nBest regards,\nZynith IT Solutions Security Team`
+        };
 
-This OTP is valid for 10 minutes.
+        const resp = await resend.emails.send({
+            from: `${mailOptions.from.name} <${mailOptions.from.address}>`,
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            html: mailOptions.html,
+            text: mailOptions.text,
+        });
 
-If you didn't request this, please ignore this email.
-
-Best regards,
-Zynith IT Solutions Security Team`
-    };
-
-    const result = await transporter.sendMail(mailOptions);
-    console.log('OTP email sent successfully:', result.messageId);
-    return { success: true, messageId: result.messageId };
+        console.log('OTP email sent via Resend:', resp.id);
+        return { success: true, messageId: resp.id };
   } catch (error) {
     console.error('Error sending OTP email:', error);
     return { success: false, error: error.message };
